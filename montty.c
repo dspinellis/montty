@@ -3,7 +3,7 @@
  *
  * Diomidis Spinellis, December 2001
  *
- * $Id: montty.c,v 1.4 2001/12/09 14:07:57 dds Exp $
+ * $Id: montty.c,v 1.5 2001/12/09 14:26:36 dds Exp $
  *
  */
 
@@ -138,7 +138,12 @@ main(int argc, char *argv[])
 			 * check if we need to write the initialisation data.
 			 */
 			if (need_init) {
-				init_term(pfd[0].fd, B57600);
+				close(pfd[0].fd);
+				if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK)) < 0) {
+					syslog(LOG_ERR, "unable to re-open monitor file %s: %m", devname);
+					exit(1);
+				}
+				init_term(pfd[0].fd, B115200);
 				for (i = 2; i < argc; i++) {
 					expand(argv[i], buff, sizeof(buff));
 					syslog(LOG_DEBUG, "write: %s", buff);

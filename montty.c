@@ -3,7 +3,7 @@
  *
  * Diomidis Spinellis, December 2001
  *
- * $Id: montty.c,v 1.5 2001/12/09 14:26:36 dds Exp $
+ * $Id: montty.c,v 1.6 2001/12/11 08:26:52 dds Exp $
  *
  */
 
@@ -80,6 +80,8 @@ expand(char *src, char *dst, int len)
 	*dst = 0;
 }
 
+/* First argv used for initialisation */
+#define INIT_ARGV 2
 
 main(int argc, char *argv[])
 {
@@ -88,9 +90,10 @@ main(int argc, char *argv[])
 	char buff[1024];
 	char devname[1024];
 	struct pollfd pfd[1];
-	int i, n;
+	int n;
 	/* True when initialisation strings must be sent */
 	int need_init = 1;	
+	int init_index = INIT_ARGV;
 	int lockresult;
 
 	if (argc < 2) {
@@ -138,21 +141,28 @@ main(int argc, char *argv[])
 			 * check if we need to write the initialisation data.
 			 */
 			if (need_init) {
-				close(pfd[0].fd);
-				if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK)) < 0) {
-					syslog(LOG_ERR, "unable to re-open monitor file %s: %m", devname);
-					exit(1);
+				if (init_index == INIT_ARGV) {
+					syslog(LOG_DEBUG, "recycle fd");
+					/* Refresh fd */
+					close(pfd[0].fd);
+					if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK)) < 0) {
+						syslog(LOG_ERR, "unable to re-open monitor file %s: %m", devname);
+						exit(1);
+					}
+					init_term(pfd[0].fd, B115200);
 				}
-				init_term(pfd[0].fd, B115200);
-				for (i = 2; i < argc; i++) {
-					expand(argv[i], buff, sizeof(buff));
+				if (init_index < argc) {
+					expand(argv[init_index], buff, sizeof(buff));
 					syslog(LOG_DEBUG, "write: %s", buff);
 					if (write(pfd[0].fd, buff, strlen(buff)) != strlen(buff)) {
 						syslog(LOG_ERR, "write failed: %m");
 						exit(1);
 					}
-				}
-				need_init = 0;
+					init_index++;
+					sleep(1);
+				} 
+				if (init_index == argc)
+					need_init = 0;
 				syslog(LOG_DEBUG, "sent init string");
 			}
 			/* Check if there is still something to read. */
@@ -180,6 +190,7 @@ main(int argc, char *argv[])
 			sleep(1);
 			/* Someone is using the device, we must re-init it */
 			need_init = 1;
+			init_index = INIT_ARGV;
 			break;
 		default:
 			syslog(LOG_ERR, "uu_lock error %s", uu_lockerr(lockresult));

@@ -3,7 +3,7 @@
  *
  * Diomidis Spinellis, December 2001
  *
- * $Id: montty.c,v 1.2 2001/12/09 12:19:24 dds Exp $
+ * $Id: montty.c,v 1.3 2001/12/09 13:12:03 dds Exp $
  *
  */
 
@@ -43,7 +43,7 @@ expand(char *src, char *dst, int len)
 			}
 		else
 			*dst++ = *p;
-	*dst++ = 0;
+	*dst = 0;
 }
 
 
@@ -77,37 +77,43 @@ main(int argc, char *argv[])
 		fclose(f);
 	}
 	snprintf(devname, sizeof(devname), "/dev/%s", argv[1]);
-	if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK)) < 0) {
+	if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK | O_APPEND)) < 0) {
 		syslog(LOG_ERR, "unable to open monitor file %s: %m", devname);
 		exit(1);
 	}
 	syslog(LOG_INFO, "monitoring %s", devname);
 	pfd[0].events = POLLIN | POLLRDNORM | POLLERR;
 	for (;;) {
-		if (!need_init)
+		if (!need_init) {
 			/* No initialisation needed, just wait for input */
+			syslog(LOG_DEBUG, "waiting for input");
 			if (poll(pfd, 1, INFTIM) < 0) {
 				syslog(LOG_ERR, "poll(INFTIM) failed: %m");
 				exit(1);
 			}
+		}
 		/* 
 		 * We have input, or we need to initialise the device;
 		 * acquire a lock.
 		 */
 		switch (lockresult = uu_lock(argv[1])) {
 		case UU_LOCK_OK:
+			syslog(LOG_DEBUG, "acquired lock");
 			/*
 			 * Now that we have the lock,
 			 * check if we need to write the initialisation data.
 			 */
 			if (need_init) {
-				for (i = 1; i < argc; i++)
+				for (i = 2; i < argc; i++) {
 					expand(argv[i], buff, sizeof(buff));
-					if (write(pfd[0].fd, buff, strlen(buff) < 0)) {
+					syslog(LOG_DEBUG, "write: %s", buff);
+					if (write(pfd[0].fd, buff, strlen(buff)) != strlen(buff)) {
 						syslog(LOG_ERR, "write failed: %m");
 						exit(1);
 					}
+				}
 				need_init = 0;
+				syslog(LOG_DEBUG, "sent init string");
 			}
 			/* Check if there is still something to read. */
 			if (poll(pfd, 1, 0) < 0) {
@@ -119,6 +125,7 @@ main(int argc, char *argv[])
 					syslog(LOG_ERR, "read failed: %m");
 					exit(1);
 				}
+				syslog(LOG_DEBUG, "read %d bytes", n);
 				buff[n] = 0;
 				syslog(LOG_INFO, "%s", buff);
 			}
@@ -126,8 +133,10 @@ main(int argc, char *argv[])
 				syslog(LOG_ERR, "uu_unlock error %m");
 				exit(1);
 			}
+			syslog(LOG_DEBUG, "lock released");
 			break;
 		case UU_LOCK_INUSE:
+			syslog(LOG_DEBUG, "lock in use; sleeping");
 			sleep(1);
 			/* Someone is using the device, we must re-init it */
 			need_init = 1;

@@ -3,7 +3,7 @@
  *
  * Diomidis Spinellis, December 2001
  *
- * $Id: montty.c,v 1.3 2001/12/09 13:12:03 dds Exp $
+ * $Id: montty.c,v 1.4 2001/12/09 14:07:57 dds Exp $
  *
  */
 
@@ -15,6 +15,40 @@
 #include <poll.h>
 #include <syslog.h>
 #include <libutil.h>
+#include <termios.h>
+
+
+/*
+ * Set terminal fd speed to s; clear non-blocking mode to make poll work
+ */
+static void
+init_term(int fd, int s)
+{
+	struct termios tio;
+	int val;
+
+	if (tcgetattr(fd, &tio) < 0) {
+		syslog(LOG_ERR, "unable get termios: %m");
+		exit(1);
+	}
+	if (cfsetspeed(&tio, s) < 0) {
+		syslog(LOG_ERR, "unable to set speed to %d: %m", s);
+		exit(1);
+	}
+	if (tcsetattr(fd, TCSAFLUSH, &tio) < 0) {
+		syslog(LOG_ERR, "unable set termios: %m");
+		exit(1);
+	}
+	if ((val = fcntl(fd, F_GETFL, 0)) < 0) {
+		syslog(LOG_ERR, "fcntl(F_GETFL) failed: %m");
+		exit(1);
+	}
+	val &= ~O_NONBLOCK;
+	if (fcntl(fd, F_SETFL, val) < 0) {
+		syslog(LOG_ERR, "fcntl(F_SETFL) failed: %m");
+		exit(1);
+	}
+}
 
 /*
  * Expand src to dst
@@ -77,7 +111,7 @@ main(int argc, char *argv[])
 		fclose(f);
 	}
 	snprintf(devname, sizeof(devname), "/dev/%s", argv[1]);
-	if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK | O_APPEND)) < 0) {
+	if ((pfd[0].fd = open(devname, O_RDWR | O_NONBLOCK)) < 0) {
 		syslog(LOG_ERR, "unable to open monitor file %s: %m", devname);
 		exit(1);
 	}
@@ -104,6 +138,7 @@ main(int argc, char *argv[])
 			 * check if we need to write the initialisation data.
 			 */
 			if (need_init) {
+				init_term(pfd[0].fd, B57600);
 				for (i = 2; i < argc; i++) {
 					expand(argv[i], buff, sizeof(buff));
 					syslog(LOG_DEBUG, "write: %s", buff);

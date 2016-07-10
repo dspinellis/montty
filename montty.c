@@ -1,12 +1,11 @@
 /*
  * Unobtrusively log data coming in on a serial device.
  *
- * Diomidis Spinellis, December 2001
- *
- * $Id: montty.c,v 1.6 2001/12/11 08:26:52 dds Exp $
+ * Diomidis Spinellis, December 2001 - July 2016
  *
  */
 
+#include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,9 +13,10 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <syslog.h>
-#include <libutil.h>
+#include <string.h>
 #include <termios.h>
 
+static int lockpid;
 
 /*
  * Set terminal fd speed to s; clear non-blocking mode to make poll work
@@ -83,6 +83,82 @@ expand(char *src, char *dst, int len)
 /* First argv used for initialisation */
 #define INIT_ARGV 2
 
+#ifndef UU_LOCK_OK
+
+/* Return values from uu_lock(). */
+#define UU_LOCK_INUSE           1
+#define UU_LOCK_OK              0
+#define UU_LOCK_OPEN_ERR        (-1)
+#define UU_LOCK_READ_ERR        (-2)
+#define UU_LOCK_CREAT_ERR       (-3)
+#define UU_LOCK_WRITE_ERR       (-4)
+#define UU_LOCK_LINK_ERR        (-5)
+#define UU_LOCK_TRY_ERR         (-6)
+#define UU_LOCK_OWNER_ERR       (-7)
+
+static int
+uu_lock(const char *ttyname)
+{
+	char try[1024];
+	char final[1024];
+	int fd;
+	char buff[50];
+
+	snprintf(try, sizeof(try), "/var/lock/LCK..%s.%d", ttyname,
+			lockpid);
+	snprintf(final, sizeof(final), "/var/lock/LCK..%s", ttyname);
+	(void)unlink(try);
+	if ((fd = open(try, O_CREAT | O_TRUNC | O_WRONLY, 0755)) == -1)
+		return UU_LOCK_CREAT_ERR;
+	sprintf(buff, "%d\n", lockpid);
+	if (write(fd, buff, strlen(buff)) != strlen(buff)) {
+			close(fd);
+			return UU_LOCK_WRITE_ERR;
+	}
+	close(fd);
+	if (rename(try, final) == -1) {
+		(void)unlink(try);
+		return UU_LOCK_INUSE;
+	} else {
+		(void)unlink(try);
+		return UU_LOCK_OK;
+	}
+}
+
+static int
+uu_unlock(const char *ttyname)
+{
+	char lockname[1024];
+
+	snprintf(lockname, sizeof(lockname), "/var/lock/LCK..%s", ttyname);
+	return unlink(lockname);
+}
+
+static const char *
+uu_lockerr(int e)
+{
+	switch (e) {
+	case UU_LOCK_INUSE:
+		return "Device is in use";
+	case UU_LOCK_OPEN_ERR:
+		return "File open error";
+	case UU_LOCK_READ_ERR:
+		return "File read error";
+	case UU_LOCK_CREAT_ERR:
+		return "File creation error";
+	case UU_LOCK_WRITE_ERR:
+		return "File write error";
+	case UU_LOCK_LINK_ERR:
+		return "File link error";
+	case UU_LOCK_TRY_ERR:
+		return "File try error";
+	case UU_LOCK_OWNER_ERR:
+		return "File owner error";
+	}
+}
+
+#endif
+
 main(int argc, char *argv[])
 {
 	FILE *f;
@@ -92,7 +168,7 @@ main(int argc, char *argv[])
 	struct pollfd pfd[1];
 	int n;
 	/* True when initialisation strings must be sent */
-	int need_init = 1;	
+	int need_init = 1;
 	int init_index = INIT_ARGV;
 	int lockresult;
 
@@ -102,6 +178,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 	daemon(0, 0);
+	lockpid = getpid();
 	snprintf(logname, sizeof(logname), "montty.%s", argv[1]);
 	openlog(logname, 0, LOG_LOCAL0);
 	syslog(LOG_INFO, "starting up: pid %d", getpid());
@@ -124,12 +201,12 @@ main(int argc, char *argv[])
 		if (!need_init) {
 			/* No initialisation needed, just wait for input */
 			syslog(LOG_DEBUG, "waiting for input");
-			if (poll(pfd, 1, INFTIM) < 0) {
+			if (poll(pfd, 1, -1) < 0) {
 				syslog(LOG_ERR, "poll(INFTIM) failed: %m");
 				exit(1);
 			}
 		}
-		/* 
+		/*
 		 * We have input, or we need to initialise the device;
 		 * acquire a lock.
 		 */

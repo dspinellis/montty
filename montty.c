@@ -31,6 +31,13 @@ init_term(int fd, int s)
 		syslog(LOG_ERR, "unable get termios: %m");
 		exit(1);
 	}
+	tio.c_iflag |= IGNBRK;
+	tio.c_iflag &= ~(ICRNL | IMAXBEL | IXON | BRKINT);
+	tio.c_oflag &= ~(OPOST | ONLCR);
+	tio.c_cflag |= CS8;
+	tio.c_cflag &= ~(CRTSCTS);
+	tio.c_lflag |= NOFLSH;
+	tio.c_lflag &= ~(ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE);
 	if (cfsetspeed(&tio, s) < 0) {
 		syslog(LOG_ERR, "unable to set speed to %d: %m", s);
 		exit(1);
@@ -174,7 +181,7 @@ main(int argc, char *argv[])
 
 	if (argc < 2) {
 		fprintf(stderr, "usage: %s line [initialisation string] ...\n"
-				"e.g. %s cuaa0 'ATS82=76\\r\\n'\n", argv[0], argv[0]);
+				"e.g. %s ttyACM0 'ATS82=76\\r\\n'\n", argv[0], argv[0]);
 		exit(1);
 	}
 	daemon(0, 0);

@@ -6,7 +6,7 @@
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: Monitor tty
-# Description:       This runs the home alarm system daemons
+# Description:       This monitors a shared tty
 ### END INIT INFO
 
 # Author: Diomidis Spinellis <dds@aueb.gr>
@@ -16,11 +16,11 @@
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC="Home alarm"
-NAME=alarmd
+DESC="Monitor tty"
+NAME=montty
 DAEMON=/usr/local/sbin/$NAME
 PIDFILE=/var/run/$NAME.pid
-SCRIPTNAME=/etc/init.d/alarm
+SCRIPTNAME=/etc/init.d/montty
 
 # Exit if the package is not installed
 [ -x "$DAEMON" ] || exit 0
